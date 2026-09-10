@@ -1,0 +1,8 @@
+obj/
+*.asi
+*.dll
+*.log
+*.exp
+*.lib
+*.obj
+*.bak
