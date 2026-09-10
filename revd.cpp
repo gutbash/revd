@@ -79,6 +79,7 @@ static const int kMaxSlots   = 64;      // the relocated table's capacity
 static int g_cfgSlots = 0;              // 0 = leave stock
 static __declspec(align(16)) DWORD g_slotTable[(kMaxSlots + 2) * 4];   // 32-byte header + entries
 static bool g_slotsDone = false, g_slotsWarned = false;
+static bool g_slotsMissedWindow = false;   // audio init beat us to it; stop trying, but do not claim success
 
 // ---- physical audio heap ------------------------------------------------------------------------
 static const DWORD kAudioHeapRva = 0x4C158C;            // imm32 of `mov esi, 0x7E00000`
@@ -200,19 +201,23 @@ static DWORD WINAPI Worker(LPVOID)
                 && !(mbi.Protect & PAGE_NOACCESS) && !(mbi.Protect & PAGE_GUARD)) {
                 if (*(DWORD*)(base + kSlotCountRva) != 0) {
                     Log("engine slots: audio initialised before the patch could land - left stock");
-                    g_slotsDone = true;   // stop trying; the window is gone
+                    g_slotsMissedWindow = true;   // stop trying; the window is gone
                 } else {
                     PatchEngineSlots(base);
                 }
             }
         }
-        if ((!wantHeap || g_heapDone) && (!wantSlots || g_slotsDone)) {
-            Log("done after %d polls", i);
+        if ((!wantHeap || g_heapDone) && (!wantSlots || g_slotsDone || g_slotsMissedWindow)) {
+            Log("finished after %d polls; heap %s, slots %s", i,
+                !wantHeap ? "off" : (g_heapDone ? "patched" : "NOT patched"),
+                !wantSlots ? "off" : (g_slotsDone ? "patched" : "NOT patched"));
             return 0;
         }
         Sleep(50);
     }
-    Log("timed out; heap %s, slots %s", g_heapDone ? "patched" : "NOT patched", g_slotsDone ? "patched" : "NOT patched");
+    Log("timed out; heap %s, slots %s",
+        !wantHeap ? "off" : (g_heapDone ? "patched" : "NOT patched"),
+        !wantSlots ? "off" : (g_slotsDone ? "patched" : "NOT patched"));
     return 0;
 }
 
