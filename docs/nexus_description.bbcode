@@ -1,59 +1,77 @@
 [size=5][b]revd: more engine audio slots for GTA IV: The Complete Edition[/b][/size]
-[i]Lifts the game's twenty-five slot ceiling to sixty-four, so traffic past the twenty-fifth vehicle model is not silent. Source and issues: [url=https://github.com/gutbash/revd]github.com/gutbash/revd[/url][/i]
+[i]A research release. Source, figures and issues: [url=https://github.com/gutbash/revd]github.com/gutbash/revd[/url][/i]
 
-[size=4][b]The problem[/b][/size]
-GTA IV plays one looping engine sound per distinct vehicle [b]model[/b] in earshot, not per vehicle, and it has a fixed table of twenty-five slots to hold them.
+[size=4][b]Abstract[/b][/size]
+GTA IV allocates one looping engine sound per distinct vehicle [b]model[/b] within earshot, not per vehicle, and stores those allocations in a fixed twenty-five entry table. The limit is invisible in a clean install because stock traffic rarely presents twenty-five distinct models at once; it becomes obvious with a traffic pack, where models past the twenty-fifth are given no slot and produce no engine sound at all. The table cannot be extended in place, because unrelated statics occupy the memory immediately after it. revd relocates the table into its own image, repoints all fourteen absolute references to it, raises the probe loop's bound, and raises the physical audio heap the slot block is carved from. The heap raise is not optional: at thirty slots on the stock heap the game crashes during audio initialisation.
 
-Stock traffic rarely puts twenty-five distinct models around you at once, so the ceiling is invisible in a clean install. Add a traffic pack, or raise vehicle variety, and you go straight past it. Every model past the twenty-fifth gets no slot, and those cars roll by making no engine noise at all. It reads as a broken audio mod, but nothing is broken: the game has simply run out of places to put the sound.
+[size=4][b]Problem[/b][/size]
+The symptom reads as a broken audio mod. Cars roll past in silence while others nearby sound normal, and which cars are silent changes as traffic churns. Nothing is broken. The game has run out of places to put the sound.
 
-The table cannot grow where it sits, because the data immediately after it is occupied. revd relocates it, repoints all fourteen references to it, and raises the limit the audio init stops at.
+The audio init at RVA 0x58D4C3 to 0x58D512 probes STREAM_ENGINE_1 upwards by name and stores each resolved slot into a table of sixteen-byte entries at 0xE832B8, with the count at 0xE83298. The loop terminates on:
+[code]0x58D50D    cmp edi, 0x19        twenty-five[/code]
+Because the probe is by name, the ceiling is jointly enforced by the executable and by pc/audio/config/waveslots.xml. Raising one without the other achieves nothing.
 
-[size=4][b]What it changes[/b][/size]
+[size=4][b]Method[/b][/size]
+[b]Relocation.[/b] Every reference to the table is an absolute displacement onto entry zero's fields, at offsets 0, 4, 8 and 12. There are fourteen, spread across 0x58B979 to 0x828054. revd allocates a sixty-four entry table inside its own image, sixteen-byte aligned behind a thirty-two byte header, and rewrites all fourteen displacements. All fourteen are verified against their expected values first; if any one disagrees, nothing is written.
+
+[b]Bound.[/b] The imm8 at 0x58D50F becomes the configured slot count.
+
+[b]Heap.[/b] The physical audio heap is a single imm32 at 0x4C158C, stock 126 MB. revd patches it to the configured size, 192 MB by default.
+
+All three writes must land after .text is decrypted and before the audio system initialises. revd polls that window at 50 ms, verifies each site, and if the window closes first it leaves the game stock and records that it did.
+
+[size=4][b]Findings[/b][/size]
+Three observations, one machine, 2026-09-06:
 [list]
-[*][b]Slots[/b] (stock 25, max 64) - how many engine audio slots the game may use.
-[*][b]AudioHeapMB[/b] (stock 126) - the physical audio heap the slots are carved from.
+[*]25 slots on the stock 126 MB heap: runs.
+[*]30 slots on the stock 126 MB heap: crashes during audio initialisation.
+[*]64 slots on a 192 MB heap: runs.
 [/list]
-Each slot costs about 0.8 MB of the audio heap. Past roughly thirty slots the stock 126 MB runs out and the game crashes while starting audio, so raising the heap is [b]not optional[/b] when you raise the slot count. The shipped 192 MB comfortably covers all sixty-four.
+One engine slot is declared as 794,624 bytes in waveslots.xml, so sixty-four declare 48.5 MB against 19.0 MB at stock.
 
-Nothing is written to disk by the plugin. Every change is made in memory at runtime.
+[b]The heap requirement is observed, not derived.[/b] The other seventy slots in waveslots.xml declare 129.2 MB between them, which already exceeds the stock 126 MB heap on its own. The heap is therefore not a straight sum of declared sizes, and what the allocator actually reserves was never measured. The crash threshold between twenty-five and thirty slots was not bisected. Treat 192 MB as a value known to work, not as a computed requirement.
+
+[b]Sixty-four is a ceiling, not a guarantee.[/b] It means the game can voice sixty-four distinct models simultaneously. Whether it does depends on how much variety is actually present.
 
 [size=4][b]Installation[/b][/size]
 [list=1]
 [*]Have an ASI loader present. Ultimate ASI Loader as dinput8.dll is the usual one, and if you run FusionFix you already have it.
-[*]Drop revd.asi and revd.ini into your GTAIV folder, next to GTAIV.exe.
-[*][b]Run add-engine-slots.ps1.[/b] See below - skipping this makes the mod do nothing.
-[*]Launch. revd.log appears next to the .asi and says exactly what was patched.
+[*]Put revd.asi and revd.ini in your GTAIV folder, next to GTAIV.exe.
+[*][b]Extend waveslots.xml.[/b] See below. Skipping this makes the plugin do nothing useful.
+[*]Launch. revd.log records every patch attempt and its outcome.
 [/list]
 
 [size=4][b]Step 3, the part people miss[/b][/size]
-The game probes for audio slots [b]by name[/b]. A slot that pc\audio\config\waveslots.xml does not define is a slot that stays empty, so raising the number in revd.ini on its own buys you nothing at all.
-
-The included add-engine-slots.ps1 appends the missing entries to your existing waveslots.xml rather than replacing it, so any other audio mod's changes survive. Right-click it and run with PowerShell, or:
+The game probes for slots by name, so a slot waveslots.xml does not define stays empty and raising the bound alone buys nothing. The included script appends the missing entries to your existing file rather than replacing it, so another audio mod's changes survive:
 [code].\add-engine-slots.ps1 -Slots 64[/code]
 It backs the original up to waveslots.xml.bak, is safe to run twice, and prints what it added.
 
-[size=4][b]Checking it worked[/b][/size]
-revd.log is the source of truth. You want two lines:
+[size=4][b]Verifying[/b][/size]
+revd.log is the source of truth. Two lines mean it worked:
 [code]engine slots: table relocated to 0F2A0120 (14 sites), probe bound 25 -> 64
 audio heap: 126 MB -> 192 MB[/code]
-If either is missing, the log says which check failed and nothing was patched.
+If either is missing, the log names the check that failed.
 
 [size=4][b]Limitations[/b][/size]
 These are the boundaries of what was tested. Nothing outside them should be assumed to work.
 [list]
-[*][b]Complete Edition 1.2.0.59 only.[/b] Every address is a hardcoded offset for that exact build. On any other version the verification fails, nothing is patched, and the log says so. It will not damage anything, it simply will not do anything.
-[*][b]64 is a hard ceiling[/b], set by the size of the relocated table. Higher values are clamped.
-[*][b]The heap raise is mandatory above about thirty slots.[/b] Raising Slots with AudioHeapMB left off will crash the game while starting audio. The log warns about that combination.
-[*][b]Slots are a ceiling, not a guarantee.[/b] Sixty-four slots means the game can voice sixty-four distinct models at once. Whether it does depends on how much variety is actually around you.
-[*][b]The patch window is narrow.[/b] Both changes have to land before the audio system starts. An ASI loader loads early enough; injecting later may not, and the mod will detect that and leave the game alone.
-[*][b]One machine.[/b] Developed and tested on a single install with FusionFix loaded through an ASI loader. Other mod stacks are untested.
+[*][b]Complete Edition 1.2.0.59 only.[/b] Every address is a hardcoded offset for that exact build. On any other version verification fails, nothing is patched, and the log says so.
+[*][b]Sixty-four is a hard ceiling[/b], set by the relocated table's capacity. Higher values are clamped.
+[*][b]The heap figure is empirical.[/b] It is a value known to work, not a derived one.
+[*][b]The heap raise is mandatory above roughly thirty slots.[/b] Raising the count without it crashes during audio initialisation. revd warns about that combination at load.
+[*][b]The patch window is narrow.[/b] An ASI loader loads early enough. Later injection may not, and revd will detect that and leave the game alone.
+[*][b]No audio quality or mixing analysis.[/b] Whether sixty-four simultaneous engine loops changes the mix balance, or costs measurable CPU, was not investigated.
+[*][b]One machine, one mod stack.[/b] Developed against a single install with FusionFix loaded through an ASI loader.
 [/list]
+
+[size=4][b]Reproducibility[/b][/size]
+Anyone reproducing this should report game build, slot count, heap size and the contents of revd.log. The open questions are the exact crash threshold on the stock heap, what the audio allocator actually reserves per slot at runtime as opposed to what the config declares, and whether the relocated table has any effect on audio CPU cost.
 
 [size=4][b]Why the file may be flagged[/b][/size]
 An .asi is a Windows DLL, and Nexus automatically quarantines uploads containing compiled code until a human reviews them. That is a rule about file types, not a detection. The full source is on GitHub under MIT, every binary is built from that source by public GitHub Actions, and you are welcome to build it yourself instead of trusting the upload.
 
-[size=4][b]Companion mod[/b][/size]
-[url=https://github.com/gutbash/popctl]popctl[/url] keeps pedestrians and traffic alive at the distances you choose instead of the ones the engine hardcodes. Separate mod, separate job, works fine alongside this one or without it. If you install popctl and raise traffic variety, you will want revd too, because that is exactly when you hit the twenty-five slot wall.
+[size=4][b]Companion release[/b][/size]
+[url=https://github.com/gutbash/popctl]popctl[/url] moves the pedestrian and traffic removal radius, which is a separate limit with a separate fix. Raising traffic variety with popctl is exactly what drives you into the ceiling this release lifts, so the two are worth reading together.
 
 [size=4][b]License[/b][/size]
 MIT. Do what you like with it, including shipping it inside your own mod pack.

@@ -1,8 +1,10 @@
 obj/
 *.asi
 *.dll
-*.log
 *.exp
 *.lib
 *.obj
+*.log
 *.bak
+__pycache__/
+docs/video/media/
