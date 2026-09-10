@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build revd.asi
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Report hash
+        shell: pwsh
+        run: |
+          $asi = Get-Item .\revd.asi
+          "built {0} ({1} bytes)" -f $asi.Name, $asi.Length
+          (Get-FileHash .\revd.asi -Algorithm SHA256).Hash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: revd
+          path: |
+            revd.asi
+            revd.ini
+            add-engine-slots.ps1
+            README.md
+            LICENSE

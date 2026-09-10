@@ -1,0 +1,59 @@
+[size=5][b]revd: more engine audio slots for GTA IV: The Complete Edition[/b][/size]
+[i]Lifts the game's twenty-five slot ceiling to sixty-four, so traffic past the twenty-fifth vehicle model is not silent. Source and issues: [url=https://github.com/gutbash/revd]github.com/gutbash/revd[/url][/i]
+
+[size=4][b]The problem[/b][/size]
+GTA IV plays one looping engine sound per distinct vehicle [b]model[/b] in earshot, not per vehicle, and it has a fixed table of twenty-five slots to hold them.
+
+Stock traffic rarely puts twenty-five distinct models around you at once, so the ceiling is invisible in a clean install. Add a traffic pack, or raise vehicle variety, and you go straight past it. Every model past the twenty-fifth gets no slot, and those cars roll by making no engine noise at all. It reads as a broken audio mod, but nothing is broken: the game has simply run out of places to put the sound.
+
+The table cannot grow where it sits, because the data immediately after it is occupied. revd relocates it, repoints all fourteen references to it, and raises the limit the audio init stops at.
+
+[size=4][b]What it changes[/b][/size]
+[list]
+[*][b]Slots[/b] (stock 25, max 64) - how many engine audio slots the game may use.
+[*][b]AudioHeapMB[/b] (stock 126) - the physical audio heap the slots are carved from.
+[/list]
+Each slot costs about 0.8 MB of the audio heap. Past roughly thirty slots the stock 126 MB runs out and the game crashes while starting audio, so raising the heap is [b]not optional[/b] when you raise the slot count. The shipped 192 MB comfortably covers all sixty-four.
+
+Nothing is written to disk by the plugin. Every change is made in memory at runtime.
+
+[size=4][b]Installation[/b][/size]
+[list=1]
+[*]Have an ASI loader present. Ultimate ASI Loader as dinput8.dll is the usual one, and if you run FusionFix you already have it.
+[*]Drop revd.asi and revd.ini into your GTAIV folder, next to GTAIV.exe.
+[*][b]Run add-engine-slots.ps1.[/b] See below - skipping this makes the mod do nothing.
+[*]Launch. revd.log appears next to the .asi and says exactly what was patched.
+[/list]
+
+[size=4][b]Step 3, the part people miss[/b][/size]
+The game probes for audio slots [b]by name[/b]. A slot that pc\audio\config\waveslots.xml does not define is a slot that stays empty, so raising the number in revd.ini on its own buys you nothing at all.
+
+The included add-engine-slots.ps1 appends the missing entries to your existing waveslots.xml rather than replacing it, so any other audio mod's changes survive. Right-click it and run with PowerShell, or:
+[code].\add-engine-slots.ps1 -Slots 64[/code]
+It backs the original up to waveslots.xml.bak, is safe to run twice, and prints what it added.
+
+[size=4][b]Checking it worked[/b][/size]
+revd.log is the source of truth. You want two lines:
+[code]engine slots: table relocated to 0F2A0120 (14 sites), probe bound 25 -> 64
+audio heap: 126 MB -> 192 MB[/code]
+If either is missing, the log says which check failed and nothing was patched.
+
+[size=4][b]Limitations[/b][/size]
+These are the boundaries of what was tested. Nothing outside them should be assumed to work.
+[list]
+[*][b]Complete Edition 1.2.0.59 only.[/b] Every address is a hardcoded offset for that exact build. On any other version the verification fails, nothing is patched, and the log says so. It will not damage anything, it simply will not do anything.
+[*][b]64 is a hard ceiling[/b], set by the size of the relocated table. Higher values are clamped.
+[*][b]The heap raise is mandatory above about thirty slots.[/b] Raising Slots with AudioHeapMB left off will crash the game while starting audio. The log warns about that combination.
+[*][b]Slots are a ceiling, not a guarantee.[/b] Sixty-four slots means the game can voice sixty-four distinct models at once. Whether it does depends on how much variety is actually around you.
+[*][b]The patch window is narrow.[/b] Both changes have to land before the audio system starts. An ASI loader loads early enough; injecting later may not, and the mod will detect that and leave the game alone.
+[*][b]One machine.[/b] Developed and tested on a single install with FusionFix loaded through an ASI loader. Other mod stacks are untested.
+[/list]
+
+[size=4][b]Why the file may be flagged[/b][/size]
+An .asi is a Windows DLL, and Nexus automatically quarantines uploads containing compiled code until a human reviews them. That is a rule about file types, not a detection. The full source is on GitHub under MIT, every binary is built from that source by public GitHub Actions, and you are welcome to build it yourself instead of trusting the upload.
+
+[size=4][b]Companion mod[/b][/size]
+[url=https://github.com/gutbash/popctl]popctl[/url] keeps pedestrians and traffic alive at the distances you choose instead of the ones the engine hardcodes. Separate mod, separate job, works fine alongside this one or without it. If you install popctl and raise traffic variety, you will want revd too, because that is exactly when you hit the twenty-five slot wall.
+
+[size=4][b]License[/b][/size]
+MIT. Do what you like with it, including shipping it inside your own mod pack.
