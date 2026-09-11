@@ -24,15 +24,15 @@
 //      past roughly thirty slots the stock heap runs out and the game crashes during audio init. If
 //      you turn the heap raise off, keep Slots at 25.
 //
-// YOU MUST ALSO EDIT waveslots.xml
-// --------------------------------
-// pc/audio/config/waveslots.xml has to actually define STREAM_ENGINE_1..Slots, contiguously. The game
-// probes for them by name; a slot the file does not define is a slot that stays empty, so raising the
-// bound alone buys nothing. See README.md.
+//   4. Declares the extra slots in pc/audio/config/waveslots.xml, because the engine probes them BY
+//      NAME and a slot the file does not declare stays empty however high the bound goes. Missing
+//      entries are appended, never replaced, so another audio mod's edits survive, and the original
+//      is backed up first. Turn it off with [revd] WriteWaveslots=0 and declare them yourself.
 //
 // SAFETY
 // ------
-// Nothing on disk is modified; every patch is made in memory at runtime. The Complete Edition's .text
+// waveslots.xml is the one and only file touched, and only when WriteWaveslots is on. Every engine
+// patch is made in memory at runtime. The Complete Edition's .text
 // is encrypted at load, so this polls until each site reads its expected stock value and only then
 // writes. If any site disagrees, nothing is written and the reason goes in revd.log. Patching is
 // skipped entirely once the audio system has initialised (the count global is no longer 0), so a late
@@ -86,6 +86,103 @@ static const DWORD kAudioHeapRva = 0x4C158C;            // imm32 of `mov esi, 0x
 static const int   kAudioHeapStock = 132120576;         // 126 MB
 static int g_cfgHeapMB = 0;                             // 0 = leave stock
 static bool g_heapDone = false, g_heapWarned = false;
+
+// ---- waveslots.xml ------------------------------------------------------------------------------
+// The engine probes slots BY NAME, so raising the bound achieves nothing unless
+// pc/audio/config/waveslots.xml also declares STREAM_ENGINE_1..Slots. This used to be a separate
+// PowerShell script; Nexus quarantines any archive containing one, so it lives here instead.
+//
+// The file is read by the audio system, which initialises well after this DLL is attached, so
+// writing it at load lands in time for the same session. Missing entries are APPENDED, never
+// replaced, so another audio mod's edits survive. The original is copied to waveslots.xml.bak the
+// first time, and never overwritten after that.
+static const int kSlotBytes = 794624;    // every stock engine slot declares exactly this
+static bool g_cfgWriteWaveslots = true;
+
+static bool ReadWholeFile(const char* path, char** out, size_t* outLen)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    if (n <= 0 || n > 8 * 1024 * 1024) { fclose(f); return false; }
+    fseek(f, 0, SEEK_SET);
+    char* buf = (char*)malloc((size_t)n + 1);
+    if (!buf) { fclose(f); return false; }
+    size_t got = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[got] = 0;
+    *out = buf; *outLen = got;
+    return true;
+}
+
+static void WaveslotsPath(char* dst, size_t cap)
+{
+    char exe[MAX_PATH];
+    GetModuleFileNameA(NULL, exe, MAX_PATH);          // ...\GTAIV\GTAIV.exe
+    char* slash = strrchr(exe, '\\');
+    if (slash) *slash = 0;
+    _snprintf(dst, cap, "%s\\pc\\audio\\config\\waveslots.xml", exe);
+    dst[cap - 1] = 0;
+}
+
+static bool EnsureWaveslots(int slots)
+{
+    char path[MAX_PATH];
+    WaveslotsPath(path, sizeof path);
+
+    char* buf = NULL; size_t len = 0;
+    if (!ReadWholeFile(path, &buf, &len)) { Log("waveslots: cannot read %s - leaving it alone", path); return false; }
+
+    // which STREAM_ENGINE_<n> already exist
+    bool present[kMaxSlots + 1];
+    memset(present, 0, sizeof present);
+    const char* kNeedle = "STREAM_ENGINE_";
+    for (const char* p = strstr(buf, kNeedle); p; p = strstr(p + 1, kNeedle)) {
+        int n = atoi(p + strlen(kNeedle));
+        if (n >= 1 && n <= kMaxSlots) present[n] = true;
+    }
+    int missing = 0;
+    for (int i = 1; i <= slots; i++) if (!present[i]) missing++;
+    if (missing == 0) { Log("waveslots: already declares STREAM_ENGINE_1..%d - not touched", slots); free(buf); return true; }
+
+    const char* close = NULL;
+    for (const char* p = strstr(buf, "</WaveSlots>"); p; p = strstr(p + 1, "</WaveSlots>")) close = p;
+    if (!close) { Log("waveslots: no </WaveSlots> in %s - leaving it alone", path); free(buf); return false; }
+
+    const char* eol = strstr(buf, "\r\n") ? "\r\n" : "\n";
+
+    char bak[MAX_PATH];
+    _snprintf(bak, sizeof bak, "%s.bak", path); bak[sizeof bak - 1] = 0;
+    if (CopyFileA(path, bak, TRUE)) Log("waveslots: backed the original up to %s", bak);
+
+    char tmp[MAX_PATH];
+    _snprintf(tmp, sizeof tmp, "%s.revdtmp", path); tmp[sizeof tmp - 1] = 0;
+    FILE* out = fopen(tmp, "wb");
+    if (!out) { Log("waveslots: cannot write %s - leaving the original alone", tmp); free(buf); return false; }
+
+    fwrite(buf, 1, (size_t)(close - buf), out);
+    for (int i = 1; i <= slots; i++) {
+        if (present[i]) continue;
+        fprintf(out, "  <Slot>%s", eol);
+        fprintf(out, "    <Name content=\"ascii\">STREAM_ENGINE_%d</Name>%s", i, eol);
+        fprintf(out, "    <MaxHeaderSize value=\"2048\" />%s", eol);
+        fprintf(out, "    <LoadType content=\"ascii\">BANK</LoadType>%s", eol);
+        fprintf(out, "    <Size value=\"%d\" />%s", kSlotBytes, eol);
+        fprintf(out, "  </Slot>%s", eol);
+    }
+    fwrite(close, 1, len - (size_t)(close - buf), out);
+    fclose(out);
+    free(buf);
+
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
+        Log("waveslots: could not replace %s (error %lu) - the original is untouched", path, GetLastError());
+        DeleteFileA(tmp);
+        return false;
+    }
+    Log("waveslots: added %d missing slot(s), now declares STREAM_ENGINE_1..%d", missing, slots);
+    return true;
+}
 
 static bool PatchAudioHeap(BYTE* base)
 {
@@ -143,7 +240,6 @@ static bool PatchEngineSlots(BYTE* base)
     FlushInstructionCache(GetCurrentProcess(), base + 0x58B000, 0x2E0000);
     g_slotsDone = true;
     Log("engine slots: table relocated to %08X (%d sites), probe bound %d -> %d", newBase, kNumSlotRefs, kStockSlots, g_cfgSlots);
-    Log("engine slots: waveslots.xml must define STREAM_ENGINE_1..%d contiguously, or the extra slots stay empty", g_cfgSlots);
     return true;
 }
 
@@ -193,6 +289,13 @@ static DWORD WINAPI Worker(LPVOID)
         base, wantHeap ? "on" : "off", wantSlots ? "on" : "off");
     if (!wantHeap && !wantSlots) { Log("nothing to do; both features off"); return 0; }
 
+    // Do this first and only once: the audio system parses waveslots.xml during the same init the
+    // patches below are racing, so the file has to be right before that starts.
+    if (wantSlots) {
+        if (g_cfgWriteWaveslots) EnsureWaveslots(g_cfgSlots);
+        else Log("waveslots: WriteWaveslots=0, so you must declare STREAM_ENGINE_1..%d yourself", g_cfgSlots);
+    }
+
     for (int i = 0; i < 2400; i++) {   // up to 2 minutes at 50 ms
         if (wantHeap && !g_heapDone) PatchAudioHeap(base);
         if (wantSlots && !g_slotsDone) {
@@ -233,6 +336,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
 
         g_cfgSlots  = GetPrivateProfileIntA("revd", "Slots", 0, g_ini);
         g_cfgHeapMB = GetPrivateProfileIntA("revd", "AudioHeapMB", 0, g_ini);
+        g_cfgWriteWaveslots = GetPrivateProfileIntA("revd", "WriteWaveslots", 1, g_ini) != 0;
 
         if (g_cfgSlots != 0 && g_cfgSlots <= kStockSlots) {
             Log("Slots=%d is at or below stock %d - nothing to raise", g_cfgSlots, kStockSlots);
@@ -244,7 +348,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
         if (g_cfgSlots > 30 && g_cfgHeapMB == 0)
             Log("WARNING: Slots=%d with the stock 126 MB audio heap will very likely crash during audio init. Set AudioHeapMB.", g_cfgSlots);
 
-        Log("revd loaded: Slots=%d AudioHeapMB=%d (stock 25 / 126)", g_cfgSlots, g_cfgHeapMB);
+        Log("revd loaded: Slots=%d AudioHeapMB=%d WriteWaveslots=%d (stock 25 / 126)", g_cfgSlots, g_cfgHeapMB, g_cfgWriteWaveslots ? 1 : 0);
         HANDLE t = CreateThread(NULL, 0, Worker, NULL, 0, NULL);
         if (t) CloseHandle(t);
     }

@@ -2,7 +2,7 @@
 [i]A research release. Source, figures and issues: [url=https://github.com/gutbash/revd]github.com/gutbash/revd[/url][/i]
 
 [size=4][b]Abstract[/b][/size]
-GTA IV allocates one looping engine sound per distinct vehicle [b]model[/b] within earshot, not per vehicle, and stores those allocations in a fixed twenty-five entry table. The limit is invisible in a clean install because stock traffic rarely presents twenty-five distinct models at once; it becomes obvious with a traffic pack, where models past the twenty-fifth are given no slot and produce no engine sound at all. The table cannot be extended in place, because unrelated statics occupy the memory immediately after it. revd relocates the table into its own image, repoints all fourteen absolute references to it, raises the probe loop's bound, and raises the physical audio heap the slot block is carved from. The heap raise is not optional: at thirty slots on the stock heap the game crashes during audio initialisation.
+GTA IV allocates one looping engine sound per distinct vehicle [b]model[/b] within earshot, not per vehicle, and stores those allocations in a fixed twenty-five entry table. The limit is invisible in a clean install because stock traffic rarely presents twenty-five distinct models at once; it becomes obvious with a traffic pack, where models past the twenty-fifth are given no slot and produce no engine sound at all. The table cannot be extended in place, because unrelated statics occupy the memory immediately after it. revd relocates the table into its own image, repoints all fourteen absolute references to it, raises the probe loop's bound, raises the physical audio heap the slot block is carved from, and declares the extra slots in the game's own audio config, which the engine matches by name. The heap raise is not optional: at thirty slots on the stock heap the game crashes during audio initialisation.
 
 [size=4][b]Problem[/b][/size]
 The symptom reads as a broken audio mod. Cars roll past in silence while others nearby sound normal, and which cars are silent changes as traffic churns. Nothing is broken. The game has run out of places to put the sound.
@@ -37,31 +37,23 @@ One engine slot is declared as 794,624 bytes in waveslots.xml, so sixty-four dec
 [list=1]
 [*]Have an ASI loader present. Ultimate ASI Loader as dinput8.dll is the usual one, and if you run FusionFix you already have it.
 [*]Put revd.asi and revd.ini in your GTAIV folder, next to GTAIV.exe.
-[*][b]Extend waveslots.xml.[/b] See below. Skipping this makes the plugin do nothing useful.
 [*]Launch. revd.log records every patch attempt and its outcome.
 [/list]
+That is the whole installation. There is no script to run and nothing to edit by hand.
 
-[size=4][b]Step 3, the part people miss[/b][/size]
-The game probes for slots [b]by name[/b], so a slot waveslots.xml does not define stays empty and raising the bound alone buys nothing at all.
+[size=4][b]What it does to waveslots.xml[/b][/size]
+The engine looks slots up [b]by name[/b], so a slot that pc\audio\config\waveslots.xml does not declare stays empty however high the bound goes. revd therefore declares them itself, at load, before the audio system parses the file.
 
-[b]The easy way.[/b] Download add-engine-slots.ps1 from the GitHub repository and run it. It appends the missing entries to your existing file rather than replacing it, so another audio mod's changes survive, it backs the original up to waveslots.xml.bak, and it is safe to run twice:
-[code].\add-engine-slots.ps1 -Slots 64[/code]
-The script is hosted on GitHub rather than bundled in the download, because Nexus's automated checks quarantine any archive containing a PowerShell script.
+It appends only the entries that are missing and leaves the rest of the file alone, so another audio mod's slot edits survive. The original is copied to waveslots.xml.bak the first time and that backup is never overwritten afterwards. Running it again changes nothing.
 
-[b]The manual way.[/b] Open pc\audio\config\waveslots.xml and, for every number from 26 to 64, add a block like this before the closing tag, changing only the number:
-[code]  <Slot>
-    <Name content="ascii">STREAM_ENGINE_26</Name>
-    <MaxHeaderSize value="2048" />
-    <LoadType content="ascii">BANK</LoadType>
-    <Size value="794624" />
-  </Slot>[/code]
-Back the file up first.
+This is the only file revd writes to. Set WriteWaveslots = 0 in the ini if you would rather manage it yourself.
 
 [size=4][b]Verifying[/b][/size]
-revd.log is the source of truth. Two lines mean it worked:
-[code]engine slots: table relocated to 0F2A0120 (14 sites), probe bound 25 -> 64
-audio heap: 126 MB -> 192 MB[/code]
-If either is missing, the log names the check that failed.
+revd.log is the source of truth. Three lines mean it worked:
+[code]waveslots: added 39 missing slot(s), now declares STREAM_ENGINE_1..64
+audio heap: 126 MB -> 192 MB
+engine slots: table relocated to 70F40BF0 (14 sites), probe bound 25 -> 64[/code]
+If any is missing, the log names the check that failed.
 
 [size=4][b]Limitations[/b][/size]
 These are the boundaries of what was tested. Nothing outside them should be assumed to work.
@@ -73,6 +65,7 @@ These are the boundaries of what was tested. Nothing outside them should be assu
 [*][b]The patch window is narrow.[/b] An ASI loader loads early enough. Later injection may not, and revd will detect that and leave the game alone.
 [*][b]No audio quality or mixing analysis.[/b] Whether sixty-four simultaneous engine loops changes the mix balance, or costs measurable CPU, was not investigated.
 [*][b]One machine, one mod stack.[/b] Developed against a single install with FusionFix loaded through an ASI loader.
+[*][b]It writes to waveslots.xml.[/b] That is the one file touched, it is backed up first, and the write is skippable, but it is a change on disk rather than in memory like everything else here.
 [/list]
 
 [size=4][b]Reproducibility[/b][/size]
@@ -81,7 +74,7 @@ Anyone reproducing this should report game build, slot count, heap size and the 
 [size=4][b]Verifying what you downloaded[/b][/size]
 The full source is on GitHub under MIT, and every binary is built from that source by public GitHub Actions, so you can read the build log or build it yourself rather than taking the upload on trust. It is a single translation unit with no dependencies beyond the Win32 SDK.
 
-revd.asi SHA-256 0e76e726e294eaf861d497bb77d0c12b87137a219124a297065e53c597d3d50d
+revd.asi SHA-256 b36e97865a498ab86cd64a6283cbd683fe843fa09bd23094bdde6be1b55b7028
 
 [size=4][b]Companion release[/b][/size]
 [url=https://github.com/gutbash/popctl]popctl[/url] moves the pedestrian and traffic removal radius, which is a separate limit with a separate fix. Raising traffic variety with popctl is exactly what drives you into the ceiling this release lifts, so the two are worth reading together.

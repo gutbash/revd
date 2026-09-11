@@ -14,7 +14,8 @@ install because stock traffic rarely presents twenty-five distinct models at onc
 with a traffic pack, where models past the twenty-fifth are given no slot and produce no engine sound
 at all. The table cannot be extended in place, because unrelated statics occupy the memory immediately
 after it. revd relocates the table into its own image, repoints all fourteen absolute references to it,
-raises the probe loop's bound, and raises the physical audio heap the slot block is carved from. The
+raises the probe loop's bound, raises the physical audio heap the slot block is carved from, and
+declares the extra slots in the game's own audio config, which the engine matches by name. The
 heap raise is not optional: at thirty slots on the stock heap the game crashes during audio
 initialisation.
 
@@ -48,9 +49,12 @@ any one disagrees, nothing is written.
 **Heap.** The physical audio heap is a single `imm32` at `0x4C158C`, stock `0x7E00000`, 126 MB. revd
 patches it to the configured size, 192 MB by default.
 
-All three writes must land after `.text` is decrypted and before the audio system initialises. revd
-polls that window at 50 ms, verifies each site, and if the window closes first it leaves the game stock
-and records that it did.
+**Wave slots.** `pc\audio\config\waveslots.xml` is rewritten at load to declare
+`STREAM_ENGINE_1..Slots`, appending only what is absent and backing the original up first.
+
+All three engine writes must land after `.text` is decrypted and before the audio system initialises,
+and the file must be correct before that same init parses it. revd polls that window at 50 ms, verifies
+each site, and if the window closes first it leaves the game stock and records that it did.
 
 ## Findings
 
@@ -98,46 +102,35 @@ A short animated walkthrough of the problem, the mechanism and the fix:
 1. Have an ASI loader present. Ultimate ASI Loader as `dinput8.dll` is the usual one, and if you run
    FusionFix you already have it.
 2. Put `revd.asi` and `revd.ini` in your `GTAIV` folder, next to `GTAIV.exe`.
-3. **Extend `waveslots.xml`.** See below. Skipping this makes the plugin do nothing useful.
-4. Launch. `revd.log` records every patch attempt and its outcome.
+3. Launch. `revd.log` records every patch attempt and its outcome.
 
-### Step 3, the part people miss
+That is the whole installation. There is no script to run and nothing to edit by hand.
 
-The game probes for slots by name, so a slot `waveslots.xml` does not define stays empty and raising
-the bound alone buys nothing. [`add-engine-slots.ps1`](add-engine-slots.ps1) in this repository
-appends the missing entries to your existing file rather than replacing it, so another audio mod's
-changes survive:
+### What it does to waveslots.xml
 
-```powershell
-.\add-engine-slots.ps1 -Slots 64
-```
+The engine looks slots up **by name**, so a slot that `pc\audio\config\waveslots.xml` does not
+declare stays empty however high the bound goes. revd therefore declares them itself, at load, before
+the audio system parses the file.
 
-It backs the original up to `waveslots.xml.bak`, is safe to run twice, and prints what it added.
+It appends only the entries that are missing and leaves the rest of the file alone, so another audio
+mod's slot edits survive. The original is copied to `waveslots.xml.bak` the first time and that backup
+is never overwritten afterwards. Running it again changes nothing.
 
-The script is **not** bundled in the release archive. Nexus's automated checks quarantine any archive
-containing a PowerShell script, which is what happened to the first upload. Grab it from this
-repository, or edit `waveslots.xml` by hand: every engine slot is an identical block differing only in
-its number.
-
-```xml
-  <Slot>
-    <Name content="ascii">STREAM_ENGINE_26</Name>
-    <MaxHeaderSize value="2048" />
-    <LoadType content="ascii">BANK</LoadType>
-    <Size value="794624" />
-  </Slot>
-```
+This is the only file revd writes to. Set `WriteWaveslots = 0` in the ini if you would rather manage it
+yourself; [`add-engine-slots.ps1`](add-engine-slots.ps1) in this repository does the same job from
+outside the game.
 
 ### Verifying
 
-`revd.log` is the source of truth. Two lines mean it worked:
+`revd.log` is the source of truth. Three lines mean it worked:
 
 ```
-engine slots: table relocated to 0F2A0120 (14 sites), probe bound 25 -> 64
+waveslots: added 39 missing slot(s), now declares STREAM_ENGINE_1..64
 audio heap: 126 MB -> 192 MB
+engine slots: table relocated to 70F40BF0 (14 sites), probe bound 25 -> 64
 ```
 
-If either is missing, the log names the check that failed.
+If any is missing, the log names the check that failed.
 
 ## Limitations
 
@@ -155,6 +148,8 @@ These are the boundaries of what was tested. Nothing outside them should be assu
   balance, or costs measurable CPU, was not investigated.
 - **One machine, one mod stack.** Developed against a single install with FusionFix loaded through an
   ASI loader.
+- **It writes to `waveslots.xml`.** That is the one file touched, it is backed up first, and the write
+  is skippable, but it is a change on disk rather than in memory like everything else here.
 
 ## Reproducibility and future work
 
