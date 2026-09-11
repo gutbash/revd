@@ -42,9 +42,20 @@ One engine slot is declared as 794,624 bytes in waveslots.xml, so sixty-four dec
 [/list]
 
 [size=4][b]Step 3, the part people miss[/b][/size]
-The game probes for slots by name, so a slot waveslots.xml does not define stays empty and raising the bound alone buys nothing. The included script appends the missing entries to your existing file rather than replacing it, so another audio mod's changes survive:
+The game probes for slots [b]by name[/b], so a slot waveslots.xml does not define stays empty and raising the bound alone buys nothing at all.
+
+[b]The easy way.[/b] Download add-engine-slots.ps1 from the GitHub repository and run it. It appends the missing entries to your existing file rather than replacing it, so another audio mod's changes survive, it backs the original up to waveslots.xml.bak, and it is safe to run twice:
 [code].\add-engine-slots.ps1 -Slots 64[/code]
-It backs the original up to waveslots.xml.bak, is safe to run twice, and prints what it added.
+The script is hosted on GitHub rather than bundled in the download, because Nexus's automated checks quarantine any archive containing a PowerShell script.
+
+[b]The manual way.[/b] Open pc\audio\config\waveslots.xml and, for every number from 26 to 64, add a block like this before the closing tag, changing only the number:
+[code]  <Slot>
+    <Name content="ascii">STREAM_ENGINE_26</Name>
+    <MaxHeaderSize value="2048" />
+    <LoadType content="ascii">BANK</LoadType>
+    <Size value="794624" />
+  </Slot>[/code]
+Back the file up first.
 
 [size=4][b]Verifying[/b][/size]
 revd.log is the source of truth. Two lines mean it worked:
@@ -67,8 +78,10 @@ These are the boundaries of what was tested. Nothing outside them should be assu
 [size=4][b]Reproducibility[/b][/size]
 Anyone reproducing this should report game build, slot count, heap size and the contents of revd.log. The open questions are the exact crash threshold on the stock heap, what the audio allocator actually reserves per slot at runtime as opposed to what the config declares, and whether the relocated table has any effect on audio CPU cost.
 
-[size=4][b]Why the file may be flagged[/b][/size]
-An .asi is a Windows DLL, and Nexus automatically quarantines uploads containing compiled code until a human reviews them. That is a rule about file types, not a detection. The full source is on GitHub under MIT, every binary is built from that source by public GitHub Actions, and you are welcome to build it yourself instead of trusting the upload.
+[size=4][b]Verifying what you downloaded[/b][/size]
+The full source is on GitHub under MIT, and every binary is built from that source by public GitHub Actions, so you can read the build log or build it yourself rather than taking the upload on trust. It is a single translation unit with no dependencies beyond the Win32 SDK.
+
+revd.asi SHA-256 0e76e726e294eaf861d497bb77d0c12b87137a219124a297065e53c597d3d50d
 
 [size=4][b]Companion release[/b][/size]
 [url=https://github.com/gutbash/popctl]popctl[/url] moves the pedestrian and traffic removal radius, which is a separate limit with a separate fix. Raising traffic variety with popctl is exactly what drives you into the ceiling this release lifts, so the two are worth reading together.

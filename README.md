@@ -104,14 +104,29 @@ A short animated walkthrough of the problem, the mechanism and the fix:
 ### Step 3, the part people miss
 
 The game probes for slots by name, so a slot `waveslots.xml` does not define stays empty and raising
-the bound alone buys nothing. The included script appends the missing entries to your existing file
-rather than replacing it, so another audio mod's changes survive:
+the bound alone buys nothing. [`add-engine-slots.ps1`](add-engine-slots.ps1) in this repository
+appends the missing entries to your existing file rather than replacing it, so another audio mod's
+changes survive:
 
 ```powershell
 .\add-engine-slots.ps1 -Slots 64
 ```
 
 It backs the original up to `waveslots.xml.bak`, is safe to run twice, and prints what it added.
+
+The script is **not** bundled in the release archive. Nexus's automated checks quarantine any archive
+containing a PowerShell script, which is what happened to the first upload. Grab it from this
+repository, or edit `waveslots.xml` by hand: every engine slot is an identical block differing only in
+its number.
+
+```xml
+  <Slot>
+    <Name content="ascii">STREAM_ENGINE_26</Name>
+    <MaxHeaderSize value="2048" />
+    <LoadType content="ascii">BANK</LoadType>
+    <Size value="794624" />
+  </Slot>
+```
 
 ### Verifying
 
