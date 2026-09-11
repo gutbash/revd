@@ -243,17 +243,30 @@ class Explainer(Scene):
             T("", 10),
             T("STREAM_ENGINE_26", 26, YELLOW, MONO),
             T("", 10),
-            T("if waveslots.xml does not define it,", 26, INK2, SERIF),
+            T("if waveslots.xml does not declare it,", 26, INK2, SERIF),
             T("the slot stays empty", 26, INK2, SERIF),
-        ).arrange(DOWN, buff=0.22).shift(UP * 0.15)
+        ).arrange(DOWN, buff=0.22).shift(UP * 0.3)
         self.play(FadeIn(body[0]), run_time=0.5)
         self.play(FadeIn(body[2]), run_time=0.5)
         self.play(FadeIn(body[4]), FadeIn(body[5]), run_time=0.6)
+        self.wait(0.8)
 
-        cmd = T("add-engine-slots.ps1", 26, AQUA, MONO).shift(DOWN * 2.3)
-        cmd2 = T("ships with revd, appends to your file, keeps other mods intact",
-                 22, MUTED, SERIF).shift(DOWN * 3.0)
-        self.play(FadeIn(cmd), FadeIn(cmd2), run_time=0.7)
+        # revd 0.2.0 declares them itself, so there is nothing for you to run
+        self.play(FadeOut(body[0]), FadeOut(body[2]), FadeOut(body[4]), FadeOut(body[5]),
+                  run_time=0.5)
+        lead = VGroup(
+            T("revd declares them for you,", 32, AQUA, SERIF),
+            T("at load, before the audio starts", 32, AQUA, SERIF),
+        ).arrange(DOWN, buff=0.3).shift(UP * 0.75)
+        detail = VGroup(
+            T("only the missing ones are added,", 24, INK2, SERIF),
+            T("and the original is backed up first", 24, INK2, SERIF),
+        ).arrange(DOWN, buff=0.26).shift(DOWN * 1.15)
+        self.play(FadeIn(lead), run_time=0.7)
+        self.play(FadeIn(detail), run_time=0.6)
+
+        foot = T("no script, nothing to edit by hand", 24, MUTED, SERIF).shift(DOWN * 2.9)
+        self.play(FadeIn(foot), run_time=0.6)
         self.wait(1.7)
         self.wipe()
 
